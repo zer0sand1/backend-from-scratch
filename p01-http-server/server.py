@@ -6,7 +6,6 @@ SERVER_PORT = 8080
 
 def parse_request(raw_data):
     # Guard agains't empty data
-    #
     if not raw_data:
         return None
 
@@ -21,7 +20,6 @@ def parse_request(raw_data):
         return None
 
     request_line = lines[0]
-
     parts = request_line.split(" ")
 
     if len(parts) != 3:
@@ -29,11 +27,22 @@ def parse_request(raw_data):
 
     method, path, version = parts
 
-    return {
-        "method": method,
-        "path": path,
-        "version": version,
-    }
+    # parse headers
+    headers = {}
+
+    for line in lines[1:]:
+        if line == "":
+            break
+
+        header_parts = line.split(": ", 1)
+
+        if len(header_parts) != 2:
+            continue
+
+        key, value = header_parts
+        headers[key] = value
+
+    return {"method": method, "path": path, "version": version, "headers": headers}
 
 
 def start_server():
@@ -68,14 +77,17 @@ def start_server():
                 print("Sent 400 Bad Request\n")
                 continue
 
-            # when parsing succed
+            # print the parsed request line
             print(f"Method: {parsed['method']}")
             print(f"Path:   {parsed['path']}")
             print(f"Version:{parsed['version']}")
 
-            response = response = (
-                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 34\r\n\r\nHello from my custom HTTP server!"
-            )
+            # Print the parsed headers
+            print("Headers:")
+            for key, value in parsed["headers"].items():
+                print(f" {key}: {value}")
+
+            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 34\r\n\r\nHello from my custom HTTP server!"
             client_socket.sendall(response.encode("utf-8"))
 
             client_socket.close()
