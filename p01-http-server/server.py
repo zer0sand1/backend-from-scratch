@@ -1,7 +1,46 @@
 import socket
 
+from response import Response
+from router import Router
+
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 8080
+
+
+def home_handler(request):
+    return Response(
+        status_code=200,
+        headers={"Content-Type": "text/plain"},
+        body="welcome to the home page!",
+    )
+
+
+def teapot_handler(request):
+    return Response(
+        status_code=418, headers={"Content-Type": "text/plain"}, body="I'm a teapot"
+    )
+
+
+def data_handler(request):
+    return Response(
+        status_code=200,
+        headers={"Content-Type": "text/plain"},
+        body="This is the data endpoint. Try sending a POST request here!",
+    )
+
+
+def not_found_handler(request):
+    return Response(
+        status_code=404,
+        headers={"Content-Type": "text/plain"},
+        body="404 - Page not found",
+    )
+
+
+def bad_request_handler(request):
+    return Response(
+        status_code=400, headers={"Content-Type": "text/plain"}, body="Bad Request"
+    )
 
 
 def parse_request(raw_data):
@@ -46,19 +85,17 @@ def parse_request(raw_data):
 
 
 def start_server():
-    # create a socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-    # set SO_REUSEADDR
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
-    # Bind to HOST:PORT
     server_socket.bind((SERVER_HOST, SERVER_PORT))
-
-    # Listen
     server_socket.listen(1)
     print(f"Server listening on http://{SERVER_HOST}:{SERVER_PORT}")
 
+    # create a router
+    router = Router()
+    router.add("GET", "/", home_handler)
+    router.add("POST", "/data", data_handler)
+    router.add("GET", "/tea", teapot_handler)
     try:
         while True:
             print("Waiting for a connection....")
@@ -71,27 +108,34 @@ def start_server():
 
             # if parsing fails
             if parsed is None:
-                response = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: 11\r\n\r\nBad Request"
-                client_socket.sendall(response.encode("utf-8"))
+                response = bad_request_handler(parsed)
+                client_socket.sendall(response.serialize().encode("utf-8"))
                 client_socket.close()
                 print("Sent 400 Bad Request\n")
                 continue
 
-            # print the parsed request line
+            handler = router.match(parsed["method"], parsed["path"])
+
+            if handler is None:
+                handler = not_found_handler
+
+            response = handler(parsed)
+            client_socket.sendall(response.serialize().encode("utf-8"))
+
             print(f"Method: {parsed['method']}")
             print(f"Path:   {parsed['path']}")
-            print(f"Version:{parsed['version']}")
+            print(f"Version: {parsed['version']}")
 
             # Print the parsed headers
             print("Headers:")
             for key, value in parsed["headers"].items():
                 print(f" {key}: {value}")
 
-            response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 34\r\n\r\nHello from my custom HTTP server!"
-            client_socket.sendall(response.encode("utf-8"))
+            print(f"Handler: {handler.__name__}")
+            print(f"Response status: {response.status_code}")
+            print()
 
             client_socket.close()
-            print("Connection closed\n")
 
     except KeyboardInterrupt:
         print("\nShutting down server...")
