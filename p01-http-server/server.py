@@ -1,4 +1,5 @@
 import socket
+import threading
 
 from response import Response
 from router import Router
@@ -84,61 +85,74 @@ def parse_request(raw_data):
     return {"method": method, "path": path, "version": version, "headers": headers}
 
 
+def handle_client(client_socket, client_address):
+    # This function runs in its own thread.
+    # ALL per-client logic is here: receive, parse, route, respond, close.
+    # The main thread is NOT blocked — it's already back at accept().
+
+    try:
+        print(f"[NEW CONNECTION] {client_address} connected")
+
+        request_data = client_socket.recv(4096)
+        parsed = parse_request(request_data)
+
+        if parsed is None:
+            response = bad_request_handler(parsed)
+            client_socket.sendall(response.serialize().encode("utf-8"))
+            print(f"[{client_address}] sent 400 Bad Request")
+            return
+
+        handler = router.match(parsed["method"], parsed["path"])
+
+        if handler is None:
+            handler = not_found_handler
+
+        response = handler(parsed)
+        client_socket.sendall(response.serialize().encode("utf-8"))
+
+        print(
+            f"[{client_address}] {parsed['method']} {parsed['path']} → {response.status_code}"
+        )
+
+    except Exception as e:
+        print(f"[ERROR] {client_address}: {e}")
+
+    finally:
+        client_socket.close()
+        print(f"[DISCONNECTED] {client_address}")
+
+
 def start_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind((SERVER_HOST, SERVER_PORT))
-    server_socket.listen(1)
+    server_socket.listen(5)
     print(f"Server listening on http://{SERVER_HOST}:{SERVER_PORT}")
 
     # create a router
+    global router
     router = Router()
     router.add("GET", "/", home_handler)
     router.add("POST", "/data", data_handler)
     router.add("GET", "/tea", teapot_handler)
+
     try:
         while True:
-            print("Waiting for a connection....")
             client_socket, client_address = server_socket.accept()
-            print(f"Connection from {client_address}")
 
-            # parse request
-            request_data = client_socket.recv(4096)
-            parsed = parse_request(request_data)
+            # spawn a new daemon thread for the client
+            thread = threading.Thread(
+                target=handle_client,
+                args=(client_socket, client_address),
+                daemon=True,
+            )
 
-            # if parsing fails
-            if parsed is None:
-                response = bad_request_handler(parsed)
-                client_socket.sendall(response.serialize().encode("utf-8"))
-                client_socket.close()
-                print("Sent 400 Bad Request\n")
-                continue
-
-            handler = router.match(parsed["method"], parsed["path"])
-
-            if handler is None:
-                handler = not_found_handler
-
-            response = handler(parsed)
-            client_socket.sendall(response.serialize().encode("utf-8"))
-
-            print(f"Method: {parsed['method']}")
-            print(f"Path:   {parsed['path']}")
-            print(f"Version: {parsed['version']}")
-
-            # Print the parsed headers
-            print("Headers:")
-            for key, value in parsed["headers"].items():
-                print(f" {key}: {value}")
-
-            print(f"Handler: {handler.__name__}")
-            print(f"Response status: {response.status_code}")
-            print()
-
-            client_socket.close()
+            thread.start()
+            print(f"[ACTIVE THREADS] {threading.active_count()}")
 
     except KeyboardInterrupt:
         print("\nShutting down server...")
+
     finally:
         server_socket.close()
         print("Server socket closed.")
