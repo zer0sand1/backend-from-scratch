@@ -40,4 +40,5 @@ class Response:
         # Combine status line + headers + blank line + body
         headers_part = f"{status_line}\r\n{headers_str}\r\n".encode("utf-8")
 
+        # body is already bytes, so we concatenate them, now it return bytes
         return headers_part + self._body_bytes
