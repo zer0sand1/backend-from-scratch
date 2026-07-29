@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P04 — Auth Glossary</title>
+<link rel="stylesheet" href="../assets/styles.css">
+<style>
+  /* Glossary-specific tweaks only; everything else is shared. */
+  dl.gloss { margin: 0 0 1.5rem; }
+  dl.gloss > dt {
+    font-weight: 600;
+    margin-top: 1.25rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--rule);
+  }
+  dl.gloss > dt:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+  dl.gloss > dd { margin-left: 0; margin-bottom: 0.25rem; }
+  dl.gloss dt .alt { font-weight: 400; color: var(--muted); font-family: "JetBrains Mono", monospace; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<article class="lesson">
+  <header class="lesson-head">
+    <div class="eyebrow">Reference · P04 · Authentication &amp; Authorization</div>
+    <h1>Glossary</h1>
+    <p>The vocabulary every P04 lesson assumes you already speak. Terms are introduced here once, then used consistently in lessons and in code. If a lesson uses an auth term, it must mean what this page defines it to mean.</p>
+  </header>
+
+  <h2>Identities &amp; the two questions</h2>
+  <dl class="gloss">
+    <dt>Authentication <span class="alt">(AuthN)</span></dt>
+    <dd>Answering <em>“who are you?”</em> — establishing that the caller is a known principal. A successful AuthN produces an <em>identity</em>, not permissions.</dd>
+
+    <dt>Authorization <span class="alt">(AuthZ)</span></dt>
+    <dd>Answering <em>“are you allowed to do that?”</em> — deciding whether an already-authenticated identity may take an action on a resource. AuthZ happens <strong>after</strong> AuthN.</dd>
+
+    <dt>Principal</dt>
+    <dd>The entity whose identity is authenticated — a user, a service, a device. In code, usually expressed as <code>user_id</code>.</dd>
+
+    <dt>Credential</dt>
+    <dd>Secret evidence presented to authenticate: a password, an API key, a signed token, a client certificate.</dd>
+  </dl>
+
+  <h2>Passwords &amp; hashing</h2>
+  <dl class="gloss">
+    <dt>Hash</dt>
+    <dd>A one-way function from password → fixed-length string. Cannot be reversed to the password. <code>"hunter2"</code> → a bcrypt hash like <code>$2b$12$…</code>.</dd>
+
+    <dt>Salt</dt>
+    <dd>Random bytes generated per-password and mixed into the hash. Defeats precomputed rainbow tables; ensures two users with the same password get <em>different</em> hashes.</dd>
+
+    <dt>Work factor <span class="alt">(cost)</span></dt>
+    <dd>The <code>2^N</code> iteration count bcrypt uses. Standard in 2025 is <code>12</code> (≈ 4 096 rounds). Doubles cost of attack and login per increment.</dd>
+
+    <dt>Pepper</dt>
+    <dd>A server-wide secret XORed into every password before hashing, stored <em>outside</em> the database. Even disclosing the DB does not crack hashes. Out of scope for P04's first pass.</dd>
+
+    <dt>bcrypt</dt>
+    <dd>Adaptive password hash built on the Blowfish key schedule. Embeds the salt and cost in the hash string itself, e.g. <code>$2b$12$&lt;salt&gt;&lt;hash&gt;</code>. Slow by design.</dd>
+
+    <dt>Argon2id</dt>
+    <dd>Modern memory-hard password hash (PHC winner). Preferred over bcrypt for new systems that can take a dependency. P04 uses bcrypt because passlib/FastAPI docs center on it.</dd>
+  </dl>
+
+  <h2>Tokens</h2>
+  <dl class="gloss">
+    <dt>JWT <span class="alt">(JSON Web Token, RFC 7519)</span></dt>
+    <dd>Three Base64url parts joined by <code>.</code>: <code>header.payload.signature</code>. Signed but not encrypted — anyone holding it can read it.</dd>
+
+    <dt>Header</dt>
+    <dd>JSON object with <code>alg</code> (e.g. <code>HS256</code>) and <code>typ</code> (<code>JWT</code>). Attackers can mutate <code>alg</code> — server must <em>pin</em> the algorithm, never trust the header.</dd>
+
+    <dt>Claims</dt>
+    <dd>The payload object — statements about the principal. Standard claims: <code>iss</code> (issuer), <code>sub</code> (subject = user id), <code>aud</code> (audience), <code>exp</code> (expires), <code>nbf</code> (not before), <code>iat</code> (issued at), <code>jti</code> (token id).</dd>
+
+    <dt>Access token</dt>
+    <dd>Short-lived JWT (P04: 15 min) sent on every protected request as <code>Authorization: Bearer &lt;jwt&gt;</code>. Stateless — server validates by signature alone.</dd>
+
+    <dt>Refresh token</dt>
+    <dd>Long-lived credential (P04: 7 days) used <em>only</em> to mint new access tokens at <code>POST /refresh</code>. Never sent to resource endpoints. Can be revoked server-side, unlike a stateless JWT.</dd>
+
+    <dt>Refresh token rotation</dt>
+    <dd>Each <code>/refresh</code> issues a new refresh token and invalidates the old one. Detects theft: if two clients present the same refresh token, one is an attacker.</dd>
+  </dl>
+
+  <h2>Authorization models</h2>
+  <dl class="gloss">
+    <dt>RBAC <span class="alt">(Role-Based Access Control)</span></dt>
+    <dd>Permissions attach to <em>roles</em>, roles attach to <em>users</em>. P04 has two roles: <code>user</code> and <code>admin</code>. Check <code>user.role == "admin"</code> in a dependency.</dd>
+
+    <dt>Ownership / ACL</dt>
+    <dd>Per-resource check beyond role: a short URL has a <code>user_id</code> foreign key; only the owner (or an admin) may <code>PUT</code>/<code>DELETE</code> it.</dd>
+
+    <dt>401 Unauthorized</dt>
+    <dd>AuthN failure — no identity, or identity not recognised. Used for missing/expired/invalid token.</dd>
+
+    <dt>403 Forbidden</dt>
+    <dd>AuthZ failure — identity is known, but is not allowed to do this thing. Used when User A hits User B's URL.</dd>
+  </dl>
+
+  <h2>OAuth2 (RFC 6749)</h2>
+  <dl class="gloss">
+    <dt>Grant type</dt>
+    <dd>The mechanism by which a client obtains an access token. Four from RFC 6749: <em>authorization code</em>, <em>implicit</em> (deprecated), <em>client credentials</em>, <em>resource owner password credentials</em> (the one P04 uses).</dd>
+
+    <dt>Bearer token</dt>
+    <dd>Token type used purely by presenting it (RFC 6750). <em>“Bearer”</em> = whoever bears it may use it — so guard transport (HTTPS only).</dd>
+
+    <dt>OAuth2PasswordBearer</dt>
+    <dd>FastAPI dependency that extracts a username/password from the standard form and returns a token. P04 uses it for the <code>/token</code> endpoint shape only.</dd>
+  </dl>
+
+  <footer>
+    <span class="ask"><strong>Stuck on a term?</strong> Ask the agent — it is your teacher and can clarify anything here in plain English.</span>
+    Companion to <a href="../lessons/0001-authn-authz-password-hashing.html">Lesson 0001 — AuthN vs AuthZ + Password Hashing</a>.
+  </footer>
+</article>
+</body>
+</html>
